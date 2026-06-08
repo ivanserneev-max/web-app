@@ -1,0 +1,29 @@
+# Headless Service — стабильная сетевая идентичность для StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-headless
+  namespace: monitoring
+spec:
+  clusterIP: None
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090
+---
+# ClusterIP Service — доступ из Grafana/Nginx
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
