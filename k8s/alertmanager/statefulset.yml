@@ -3,20 +3,47 @@ kind: StatefulSet
 metadata:
   name: alertmanager
   namespace: monitoring
+  labels:
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/part-of: monitoring
+    app.kubernetes.io/version: v0.31.0
 spec:
-  serviceName: alertmanager-headless # Headless Service
+  serviceName: alertmanager-headless
   replicas: 1
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
-      app: alertmanager
+      app.kubernetes.io/component: monitoring
+      app.kubernetes.io/name: alertmanager
+      app.kubernetes.io/part-of: monitoring
   template:
     metadata:
       labels:
-        app: alertmanager
+        app.kubernetes.io/component: monitoring
+        app.kubernetes.io/name: alertmanager
+        app.kubernetes.io/part-of: monitoring
+        app.kubernetes.io/version: v0.31.0
     spec:
+      automountServiceAccountToken: false
+      # terminationGracePeriodSeconds: 120 (ДОБАВЛЕНО, было дефолтных 30с)
+      # Alertmanager при получении SIGTERM должен:
+      #   1) дождаться конца текущего evaluation цикла,
+      #   2) записать notification log и silence state на диск (PVC ниже).
+      # 30с может не хватить при большом количестве активных алертов.
+      # 120с даёт достаточный запас без риска зависания rollout'а.
+      terminationGracePeriodSeconds: 120
+      # ДОБАВЛЕНО: защита от eviction при нехватке ресурсов на ноде.
+      # PriorityClass определён в priorityclass.yml.
+      priorityClassName: monitoring-critical
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
+        # ДОБАВЛЕНО: закрывает gap PSS Restricted, где
+        # runAsGroup не требуется явно, но без него
+        # процесс может войти в GID 0 (root group).
+        runAsGroup: 65534
         fsGroup: 65534
       containers:
         - name: alertmanager
@@ -44,6 +71,13 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           volumeMounts:
             - name: secret-volume
               mountPath: /run/secrets
@@ -55,11 +89,11 @@ spec:
               mountPath: /alertmanager
           resources:
             requests:
-              memory: "32Mi"
-              cpu: "50m"
-            limits:
               memory: "64Mi"
               cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"
       volumes:
         - name: config
           configMap:
