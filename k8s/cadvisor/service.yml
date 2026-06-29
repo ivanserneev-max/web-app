@@ -1,0 +1,21 @@
+# Headless Service (clusterIP: None) - для DaemonSet это ключевая деталь:
+# DNS-запрос к "cadvisor.monitoring.svc.cluster.local" вернёт ПО ОДНОЙ
+# A-записи на каждый под (то есть на каждую ноду), а не один общий
+# виртуальный IP. На этом и строится role: endpoints в kubernetes_sd_configs
+# (prometheus/configmap.yml) - без headless-сервиса service discovery по
+# эндпоинтам не сработал бы.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cadvisor
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: cadvisor
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: cadvisor
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics

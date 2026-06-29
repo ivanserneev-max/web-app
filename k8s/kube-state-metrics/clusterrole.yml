@@ -1,0 +1,68 @@
+# RBAC намеренно сокращён относительно официального
+# ClusterRole kube-state-metrics.
+# Включены только ресурсы, метрики которых используются
+# текущим мониторинг-стеком.
+# Secrets исключены сознательно для уменьшения blast radius
+# при компрометации ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-state-metrics
+  labels:
+    app.kubernetes.io/component: exporter
+    app.kubernetes.io/name: kube-state-metrics
+    # ИСПРАВЛЕНО: было "2.19.1" без "v" - для единообразия с остальными
+    # файлами kube-state-metrics (deployment.yml, serviceaccount.yml,
+    # clusterrolebinding.yml) везде теперь формат "vX.Y.Z".
+    app.kubernetes.io/version: v2.19.1
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - pods
+      - services
+      - endpoints
+      - persistentvolumes
+      - persistentvolumeclaims
+      - namespaces
+      - replicationcontrollers
+      - resourcequotas
+      - configmaps
+      - limitranges
+    verbs:
+      - list
+      - watch
+  - apiGroups: ["apps"]
+    resources:
+      - daemonsets
+      - deployments
+      - replicasets
+      - statefulsets
+    verbs:
+      - list
+      - watch
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs:
+      - list
+      - watch
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - list
+      - watch
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+    verbs:
+      - list
+      - watch
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - volumeattachments
+    verbs:
+      - list
+      - watch

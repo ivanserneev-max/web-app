@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/component: exporter
+    app.kubernetes.io/name: node-exporter
+    app.kubernetes.io/part-of: monitoring
+    app.kubernetes.io/version: v1.6.1
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: exporter
+      app.kubernetes.io/name: node-exporter
+      app.kubernetes.io/part-of: monitoring
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: exporter
+        app.kubernetes.io/name: node-exporter
+        app.kubernetes.io/part-of: monitoring
+        app.kubernetes.io/version: v1.6.1
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534 # nobody
+        runAsGroup:
+          65534 # ДОБАВЛЕНО: без явного runAsGroup процесс может запуститься
+          # в GID 0 (root group), что даёт доступ к файлам с
+          # group-ownership root. Это известный gap Pod Security Standards
+          # Restricted-профиля (github.com/kubernetes/kubernetes/issues/118987).
+        seccompProfile:
+          type: RuntimeDefault # чтобы покрыть всё Pod сразу, даже если добавятся init-контейнеры.
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - name: node-exporter
+          image: quay.io/prometheus/node-exporter:v1.6.1
+          args:
+            - "--path.rootfs=/rootfs"
+            - "--path.sysfs=/host/sys"
+            - "--path.procfs=/host/proc"
+            - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+            - "--no-collector.wifi"
+            - "--no-collector.hwmon"
+            - "--no-collector.gmond"
+            - "--no-collector.netstat"
+            - "--no-collector.sockstat"
+            - "--no-collector.buddyinfo"
+            - "--no-collector.meminfo_numa"
+          ports:
+            - containerPort: 9100
+              name: metrics
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 1
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+          # В отличие от cAdvisor, node-exporter не нуждается ни в root, ни в
+          # privileged: true - он читает /proc и /sys только на чтение через
+          # volume mount, поэтому применяем полный хардненинг без исключений.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: rootfs
+              mountPath: /rootfs
+              readOnly: true
+              mountPropagation: HostToContainer
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+      tolerations:
+        # Толерантен к любым taint'ам, включая control-plane - метрики
+        # нужны со всех нод кластера, не только воркеров.
+        # Важно для multi-node: без этого на control-plane нодах
+        # (taint node-role.kubernetes.io/control-plane:NoSchedule)
+        # node-exporter просто не запустится.
+        - operator: Exists
+      nodeSelector:
+        kubernetes.io/os: linux
+      volumes:
+        - name: rootfs
+          hostPath:
+            path: /
+            type: Directory
+        - name: sys
+          hostPath:
+            path: /sys
+            type: Directory
+        - name: proc
+          hostPath:
+            path: /proc
+            type: Directory

@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cadvisor
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/component: exporter
+    app.kubernetes.io/name: cadvisor
+    app.kubernetes.io/part-of: monitoring
+    app.kubernetes.io/version: "0.56.2"
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: exporter
+      app.kubernetes.io/name: cadvisor
+      app.kubernetes.io/part-of: monitoring
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: exporter
+        app.kubernetes.io/name: cadvisor
+        app.kubernetes.io/part-of: monitoring
+        app.kubernetes.io/version: "0.56.2"
+    spec:
+      automountServiceAccountToken: false
+      # runAsUser: 0 (root) - намеренное и неизбежное исключение из
+      # хардненинга, принятого для остальных компонентов проекта. Чтобы
+      # читать cgroups, /proc и сокет container runtime ВСЕХ контейнеров
+      # на ноде, cAdvisor физически не может работать как обычный
+      # непривилегированный под - это плата за то, что он собирает метрики
+      # снаружи, а не изнутри изолированного namespace.
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: cadvisor
+          image: ghcr.io/google/cadvisor:0.56.2
+          args:
+            - "--housekeeping_interval=30s"
+            - "--store_container_labels=true"
+          ports:
+            - containerPort: 8080
+              name: metrics
+          securityContext:
+            privileged: true
+            # cAdvisor требует privileged-доступ для чтения cgroups,
+            # информации о контейнерах и части ресурсов хоста.
+            # Privileged контейнер фактически получает уровень доступа,
+            # близкий к root на ноде. Компрометация cAdvisor может привести
+            # к компрометации всего узла.
+            # Для production Kubernetes-кластеров рекомендуется рассмотреть
+            # сбор контейнерных метрик через kubelet /metrics/cadvisor,
+            # что позволяет отказаться от отдельного привилегированного
+            # DaemonSet.
+            readOnlyRootFilesystem: false # cAdvisor пишет временные файлы/кэш, read-only здесь не вариант
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 1
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: rootfs
+              mountPath: /rootfs
+              readOnly: true
+              mountPropagation: HostToContainer # Аналог rslave
+            - name: var-run
+              mountPath: /var/run
+              readOnly: true
+            - name: sys
+              mountPath: /sys
+              readOnly: true
+            - name: docker
+              mountPath: /var/lib/docker
+              readOnly: true
+            - name: disk
+              mountPath: /dev/disk
+              readOnly: true
+      tolerations:
+        # operator: Exists без key/effect - толерантен к ЛЮБЫМ taint'ам,
+        # включая control-plane. Это осознанно: метрики хочется собирать
+        # со всех нод кластера, включая мастер, а не только с воркеров.
+        - operator: Exists
+      nodeSelector:
+        kubernetes.io/os: linux
+      volumes:
+        - name: rootfs
+          hostPath:
+            path: /
+            type: Directory
+        - name: var-run
+          hostPath:
+            path: /var/run
+            type: Directory
+        - name: sys
+          hostPath:
+            path: /sys
+            type: Directory
+        - name: docker
+          hostPath:
+            path: /var/lib/docker
+            # ВАЖНО, проверь перед деплоем: `type: Directory` заставляет
+            # Kubernetes проверить, что путь существует на ноде, ДО старта
+            # пода - если container runtime на нодах не Docker, а
+            # containerd (типично для большинства managed-кластеров, в т.ч.
+            # часто и для облачных провайдеров), /var/lib/docker может
+            # просто не существовать, и под не запустится с ошибкой вида
+            # "hostPath type check failed". Узнать runtime: `kubectl get
+            # nodes -o wide` (колонка CONTAINER-RUNTIME). Здесь type
+            # намеренно НЕ указан (в отличие от остальных volumes выше) -
+            # без явного type Kubernetes не делает pre-flight проверку, а
+            # большинство runtime просто примонтируют то, что есть (пустую
+            # директорию, если Docker не используется) - без этого
+            # послабления манифест был бы хрупким именно на containerd-нодах.
+        - name: disk
+          hostPath:
+            path: /dev/disk
+            type: Directory
