@@ -6,33 +6,83 @@ metadata:
 data:
   prometheus.yml: |
     global:
-      scrape_interval: 30s 
-      evaluation_interval: 30s 
-      scrape_timeout: 10s 
+      scrape_interval: 15s
+      evaluation_interval: 30s
+      scrape_timeout: 10s
+
     scrape_configs:
-    - job_name: prometheus # Метрики самого Prometheus
-      static_configs:
-      - targets: ['localhost:9090']
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
 
-    - job_name: node-exporter # Метрики хоста (CPU, RAM, Disk, Network)
-      static_configs:
-        - targets: ['node-exporter.monitoring.svc.cluster.local:9100']
+      # node-exporter - DaemonSet: один под на каждую ноду.
+      # kubernetes_sd_configs с role: endpoints - единственный способ
+      # скрейпить каждый под DaemonSet'а отдельно. static_configs с одним
+      # DNS-именем Service'а даёт метрики только ОДНОЙ случайной ноды.
+      - job_name: 'node-exporter'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['monitoring']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: node-exporter
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+          - source_labels: [__meta_kubernetes_endpoint_node_name]
+            target_label: node
 
-    - job_name: cadvisor # Метрики Docker-контейнеров
-      static_configs:
-        - targets: ['cadvisor.monitoring.svc.cluster.local:8080']
+      - job_name: 'cadvisor'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['monitoring']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: cadvisor
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+          - source_labels: [__meta_kubernetes_endpoint_node_name]
+            target_label: node
 
-    - job_name: alertmanager # Метрики Alertmanager (Позволяет алертить если Alertmanager сам упал)
-      static_configs:
-        - targets: ['alertmanager.monitoring.svc.cluster.local:9093']
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets: ['kube-state-metrics.monitoring.svc.cluster.local:8080']
+
+      - job_name: 'alertmanager'
+        static_configs:
+          - targets: ['alertmanager.monitoring.svc.cluster.local:9093']
 
     alerting:
       alertmanagers:
-        - static_configs:
-            - targets: ['alertmanager.monitoring.svc.cluster.local:9093']
+        # Headless-сервис + kubernetes_sd_configs (роль endpoints) - работает
+        # при любом количестве реплик Alertmanager.
+        # static_configs с обычным ClusterIP допустим только для replicas: 1,
+        # при >1 отправлял бы все уведомления на одну случайную реплику.
+        # Текущая конфигурация не требует изменений при масштабировании.
+        - kubernetes_sd_configs:
+            - role: endpoints
+              namespaces:
+                names: ['monitoring']
+          relabel_configs:
+            # Фильтр по имени сервиса - берём только headless (он содержит
+            # endpoint'ы всех трёх подов), а не обычный ClusterIP.
+            - source_labels: [__meta_kubernetes_service_name]
+              action: keep
+              regex: alertmanager-headless
+            # Фильтр по имени порта - берём только http (9093), не cluster
+            # (9094, который нужен только для gossip между репликами).
+            - source_labels: [__meta_kubernetes_endpoint_port_name]
+              action: keep
+              regex: http
           timeout: 30s
 
     rule_files:
       - "/etc/prometheus/alerts/host.yml"
       - "/etc/prometheus/alerts/container.yml"
       - "/etc/prometheus/alerts/service.yml"
+      - "/etc/prometheus/alerts/kubernetes.yml"
