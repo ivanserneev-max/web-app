@@ -3,10 +3,12 @@ kind: Service
 metadata:
   name: grafana
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana
 spec:
   type: ClusterIP
   selector:
-    app: grafana
+    app.kubernetes.io/name: grafana
   ports:
     - name: http
       port: 3000
