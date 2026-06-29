@@ -127,12 +127,19 @@ spec:
         - name: config
           configMap:
             name: prometheus-config
+        - name: alerts
+          configMap:
+            name: prometheus-alerts
+  # StatefulSet используется из-за локального состояния TSDB.
+  # Потеря PVC приведёт к потере исторических метрик.
   volumeClaimTemplates:
     - metadata:
         name: prometheus-storage
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: local-path
+        storageClassName: longhorn
         resources:
           requests:
-            storage: 1Gi
+            # Размер PVC выбран с запасом под WAL,
+            # checkpoint-файлы и временный рост TSDB во время compaction.
+            storage: 5Gi
