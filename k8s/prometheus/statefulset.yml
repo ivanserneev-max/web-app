@@ -3,21 +3,46 @@ kind: StatefulSet
 metadata:
   name: prometheus
   namespace: monitoring
+  labels:
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: monitoring
+    app.kubernetes.io/version: v2.48.0
 spec:
-  serviceName: prometheus-headless # Headless Service
+  serviceName: prometheus-headless
   replicas: 1
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
-      app: prometheus
+      app.kubernetes.io/component: monitoring
+      app.kubernetes.io/name: prometheus
+      app.kubernetes.io/part-of: monitoring
   template:
     metadata:
       labels:
-        app: prometheus
+        app.kubernetes.io/component: monitoring
+        app.kubernetes.io/name: prometheus
+        app.kubernetes.io/part-of: monitoring
+        app.kubernetes.io/version: v2.48.0
     spec:
       serviceAccountName: prometheus
+      # Увеличенное время завершения позволяет Prometheus
+      # корректно завершить WAL/checkpoint операции и уменьшает
+      # время последующего WAL replay при старте.
+      terminationGracePeriodSeconds: 120
+      # ДОБАВЛЕНО: защита от eviction при нехватке ресурсов на ноде.
+      # PriorityClass определён в priorityclass.yml.
+      priorityClassName: monitoring-critical
       securityContext:
+        # UID/GID 65534 используются официальным образом Prometheus
+        # для запуска без root-привилегий. fsGroup нужен, чтобы PVC примонтировался
+        # fsGroup нужен, чтобы примонтированный PVC был доступен
+        # на запись процессу Prometheus независимо от владельца
+        # файловой системы тома.
         runAsNonRoot: true
         runAsUser: 65534
+        runAsGroup: 65534 # ДОБАВЛЕНО: закрывает gap PSS Restricted (GID 0 без явного runAsGroup).
         fsGroup: 65534
       containers:
         - name: prometheus
@@ -25,17 +50,33 @@ spec:
           args:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus"
+            # Одновременно используются ограничения по времени и размеру.
+            # Prometheus применяет более жёсткое из двух ограничений.
             - "--storage.tsdb.retention.time=15d"
             - "--storage.tsdb.retention.size=800MB"
+            # Включает HTTP-эндпоинт /-/reload.
+            # Alert rules смонтированы без subPath и могут применяться через reload.
+            # Основной prometheus.yml смонтирован через subPath, поэтому после его
+            # изменения требуется: kubectl rollout restart statefulset/prometheus
             - "--web.enable-lifecycle"
           ports:
             - name: http
               containerPort: 9090
+          # startupProbe с большим failureThreshold даёт Prometheus время на
+          # восстановление (replay WAL) при старте с уже непустым TSDB.
+          # Без startupProbe liveness/readiness могут начать проверку
+          # слишком рано и перезапустить Pod до завершения восстановления.
+          startupProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            failureThreshold: 30
+            periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /-/healthy
               port: 9090
-            initialDelaySeconds: 30
+            initialDelaySeconds: 0
             periodSeconds: 15
             timeoutSeconds: 10
             failureThreshold: 3
@@ -47,10 +88,32 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          # Хардненинг контейнера: запуск не от root, без возможности
+          # повышения привилегий, без единой Linux capability, read-only
+          # корневая ФС (писать можно только в примонтированные тома -
+          # /prometheus и другие явно смонтированные writable volume). Prometheus для своей работы
+          # большего и не просит.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           volumeMounts:
+            # subPath здесь осознанно: монтируем только ОДИН файл prometheus.yml
+            # из ConfigMap, а не всю директорию. Файлы, смонтированные через subPath, НЕ обновляются автоматически
+            # при изменении ConfigMap. После изменения prometheus-config
+            # необходимо выполнить `kubectl rollout restart statefulset/prometheus`
+            # Только после перезапуска новый prometheus.yml попадёт внутрь контейнера
             - name: config
               mountPath: /etc/prometheus/prometheus.yml
               subPath: prometheus.yml
+            # Alert rules смонтированы директорией без использования subPath.
+            # Изменения ConfigMap становятся доступны контейнеру автоматически
+            # без перезапуска Pod.
+            - name: alerts
+              mountPath: /etc/prometheus/alerts/
             - name: prometheus-storage
               mountPath: /prometheus
           resources:
