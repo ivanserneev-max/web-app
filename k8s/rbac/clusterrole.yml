@@ -1,8 +1,42 @@
+# ClusterRole с минимально необходимым набором прав для Prometheus.
+#
+# ПОЧЕМУ только get/list/watch: Prometheus - read-only observability
+# инструмент, ему никогда не нужны create/update/delete/patch на чужих
+# ресурсах. Любой verb сверх get/list/watch здесь - расширение поверхности
+# атаки без функциональной необходимости.
+#
+# ПОЧЕМУ ClusterRole, а не Role: service discovery нод и подов
+# (kubernetes_sd_configs) работает на уровне всего кластера, а не одного
+# namespace - нодам namespace не принадлежит вообще, значит обычная
+# namespaced Role физически не может дать к ним доступ.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: prometheus
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
 rules:
-- apiGroups: ['']          # '' = core API group
-  resources: ['pods', 'nodes', 'services', 'endpoints']
-  verbs: ['get', 'list', 'watch']  # Глаголы: get,list,watch
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/metrics # метрики kubelet/cAdvisor через API server (альтернативный путь, не используется в текущем prometheus.yml, но не вредит)
+      - nodes/proxy # проксирование запросов к kubelet API
+      - services
+      - endpoints # обязательно для role: endpoints в kubernetes_sd_configs (node-exporter, cadvisor jobs)
+      - pods
+      - namespaces # для фильтрации service discovery по namespace (namespaces.names в kubernetes_sd_configs)
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs:
+      - get

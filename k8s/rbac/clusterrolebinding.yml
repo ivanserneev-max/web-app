@@ -1,11 +1,18 @@
+# Связывает ClusterRole "prometheus" с ServiceAccount "prometheus" из
+# namespace monitoring. Без этого биндинга роль выше не имеет эффекта -
+# ClusterRole - это просто набор правил, он ни на кого не действует, пока
+# не привязан к конкретному subject через ClusterRoleBinding/RoleBinding.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: prometheus
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
 subjects:
-- kind: ServiceAccount
-  name: prometheus
-  namespace: monitoring
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
 roleRef:
   kind: ClusterRole
   name: prometheus
