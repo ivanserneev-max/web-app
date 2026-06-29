@@ -1,27 +1,36 @@
-# Headless Service — стабильная сетевая идентичность для StatefulSet
+# Два сервиса с разным назначением:
+#   1) headless (clusterIP: None) - даёт стабильное DNS-имя поду StatefulSet
+#      (требование самого StatefulSet, см. spec.serviceName в statefulset.yml).
+#      Также через него работает role: endpoints в kubernetes_sd_configs.
+#   2) обычный ClusterIP - для всех, кому нужен один стабильный адрес
+#      Prometheus: Grafana (datasource), будущий nginx/ingress, curl изнутри
+#      кластера для дебага.
 apiVersion: v1
 kind: Service
 metadata:
   name: prometheus-headless
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
 spec:
   clusterIP: None
   selector:
-    app: prometheus
+    app.kubernetes.io/name: prometheus
   ports:
     - port: 9090
       targetPort: 9090
 ---
-# ClusterIP Service — доступ из Grafana/Nginx
 apiVersion: v1
 kind: Service
 metadata:
   name: prometheus
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
 spec:
   type: ClusterIP
   selector:
-    app: prometheus
+    app.kubernetes.io/name: prometheus
   ports:
     - name: http
       port: 9090
