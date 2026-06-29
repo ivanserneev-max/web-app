@@ -9,14 +9,28 @@ data:
     datasources:
       - name: Prometheus
         type: prometheus
+        # Добавлен явный uid. Без него Grafana сама генерирует
+        # случайный UID при провижининге (что-то вроде "-DI2VkR4z"), а
+        # дашборд node-exporter.json (grafana/configmap-dashboards.yml)
+        # ссылается на источник по жёстко прописанному
+        # {"type": "prometheus", "uid": "Prometheus"} - без совпадения UID
+        # все панели этого дашборда показывали бы "Datasource not found".
+        # Регистр важен - должен совпадать буква в букву с тем, что лежит
+        # в JSON дашборда.
+        uid: Prometheus
         access: proxy
         url: http://prometheus.monitoring.svc.cluster.local:9090
         isDefault: true
         editable: false
         jsonData:
-          timeRange:
-            from: now-1h
-            to: now
+          # ИСПРАВЛЕНО: было "timeRange: {from, to}" - это НЕ документированное
+          # поле Prometheus datasource в Grafana (проверено по официальной
+          # документации provisioning), Grafana его просто игнорирует, оно
+          # ничего не делает. Дефолтный диапазон времени задаётся на уровне
+          # дашборда (поле "time" в JSON), а не датасорса. Вместо мёртвого
+          # поля - два реально поддерживаемых:
+          httpMethod: POST       # рекомендуется официальной документацией для запросов с длинными списками label-матчеров (GET может упереться в лимит длины URL)
+          timeInterval: 15s      # должен совпадать со scrape_interval в prometheus/configmap.yml - влияет на то, как Grafana интерполирует "пропуски" между точками на графике
 
   dashboard.yml: |
     apiVersion: 1
