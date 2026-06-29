@@ -41,7 +41,14 @@ data:
         folderUid: ""
         type: file
         disableDeletion: false
+        # Раз в 30 секунд Grafana сама проверяет /etc/grafana/dashboards на
+        # изменения и обновляет дашборды без перезапуска. Это РАБОТАЕТ
+        # только потому, что grafana-dashboards смонтирован в
+        # grafana/deployment.yml целой директорией без subPath - иначе
+        # файлы внутри контейнера просто не обновлялись бы, и эта настройка
+        # была бы бесполезна (как и provisioning-файлы выше, которые
+        # смонтированы через subPath и поэтому требуют restart).
         updateIntervalSeconds: 30
-        allowUiUpdates: true
+        allowUiUpdates: false
         options:
           path: /etc/grafana/dashboards
