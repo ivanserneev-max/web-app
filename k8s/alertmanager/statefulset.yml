@@ -101,12 +101,18 @@ spec:
         - name: secret-volume
           secret:
             name: alertmanager-secret
+  # Alertmanager хранит silence state и notification log на диске.
+  # StatefulSet обеспечивает стабильное хранилище между рестартами.
   volumeClaimTemplates:
     - metadata:
         name: alertmanager-storage
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: local-path
+        # Longhorn работает и на single-node, и на multi-node кластерах.
+        # На текущем single-node кластере работает как local storage,
+        # при добавлении нод PVC автоматически станет реплицированным
+        # без изменения манифеста.
+        storageClassName: longhorn
         resources:
           requests:
             storage: 1Gi
