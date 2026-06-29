@@ -1,0 +1,318 @@
+# Правила алертов, разбитые по файлам внутри одного ConfigMap (по одному
+# data-ключу на файл - prometheus.yml видит их как отдельные файлы в
+# /etc/prometheus/alerts/, см. rule_files в prometheus/configmap.yml).
+# Эта структура уже без замечаний по содержанию - правила здорового
+# уровня (severity warning/critical разнесены, inhibit_rules в
+# alertmanager/configmap.yml гасят шум при каскадных сбоях).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: monitoring
+data:
+  host.yml: |
+    groups:
+      - name: host_alerts
+        interval: 20s
+        rules:
+          - alert: HighCPUUsage
+            expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+            for: 2m
+            labels:
+              severity: warning
+              component: host
+            annotations:
+              summary: "Высокая загрузка CPU на {{ $labels.instance }}"
+              description: 'CPU > 80% в течение 2 минут. Значение: {{ $value | printf "%.1f" }}%'
+
+          - alert: CriticalCPUUsage
+            expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+            for: 2m
+            labels:
+              severity: critical
+              component: host
+            annotations:
+              summary: "Критическая загрузка CPU на {{ $labels.instance }}"
+              description: 'CPU > 95% в течение 2 минут. Значение: {{ $value | printf "%.1f" }}%'
+
+          - alert: HighMemoryUsage
+            expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+            for: 30s
+            labels:
+              severity: warning
+              component: host
+            annotations:
+              summary: "Высокое использование RAM на {{ $labels.instance }}"
+              description: 'RAM > 80%. Значение: {{ $value | printf "%.1f" }}%'
+
+          - alert: CriticalMemoryUsage
+            expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+            for: 2m
+            labels:
+              severity: critical
+              component: host
+            annotations:
+              summary: "Критическое использование RAM на {{ $labels.instance }}"
+              description: 'RAM > 95% в течение 2 минут. Значение: {{ $value | printf "%.1f" }}%'
+
+          - alert: HighDiskUsage
+            expr: (1 - (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|aufs|squashfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay|aufs|squashfs"})) * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+              component: host
+            annotations:
+              summary: "Высокая загрузка диска на {{ $labels.instance }}"
+              description: 'Диск {{ $labels.mountpoint }} > 80%. Значение: {{ $value | printf "%.1f" }}%'
+
+          - alert: CriticalDiskUsage
+            expr: (1 - (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|aufs|squashfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay|aufs|squashfs"})) * 100 > 95
+            for: 2m
+            labels:
+              severity: critical
+              component: host
+            annotations:
+              summary: "Критическая загрузка диска на {{ $labels.instance }}"
+              description: 'Диск {{ $labels.mountpoint }} > 95%. Значение: {{ $value | printf "%.1f" }}%'
+
+          - alert: NodeExporterDown
+            expr: up{job="node-exporter"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              component: monitoring
+            annotations:
+              summary: "Node Exporter недоступен"
+              description: "Prometheus не получает метрики хоста более 1 минуты"
+
+  container.yml: |
+    groups:
+      - name: container_alerts
+        interval: 15s
+        rules:
+          # Фильтр container!="POD" исключает служебный pause-контейнер K8s
+          - alert: ContainerHighCPU
+            expr: |
+              (
+                sum by (namespace, pod, container) (
+                  rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+                )
+                /
+                sum by (namespace, pod, container) (
+                  (container_spec_cpu_quota{container!="", container!="POD"} > 0)
+                  / container_spec_cpu_period{container!="", container!="POD"}
+                )
+              ) * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+              component: container
+            annotations:
+              summary: "Высокое CPU у {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }}"
+              description: 'Использование CPU: {{ $value | printf "%.1f" }}% от лимита'
+
+          - alert: ContainerHighMemory
+            expr: |
+              (
+                container_memory_usage_bytes{container!="", container!="POD"}
+                / container_spec_memory_limit_bytes{container!="", container!="POD"}
+              ) * 100 > 80
+              and
+              container_spec_memory_limit_bytes{container!="", container!="POD"} > 0
+            for: 30s
+            labels:
+              severity: warning
+              component: container
+            annotations:
+              summary: "Высокая память у {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }}"
+              description: 'Использование памяти: {{ $value | printf "%.1f" }}% от лимита'
+
+          # Перезапуски теперь через kube-state-metrics (надёжнее чем changes())
+          - alert: ContainerCrashLooping
+            expr: increase(kube_pod_container_status_restarts_total[15m]) >= 3
+            for: 0s
+            labels:
+              severity: critical
+              component: container
+            annotations:
+              summary: "Контейнер {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} в crash loop"
+              description: '{{ $value | printf "%.0f" }} перезапусков за последние 15 минут'
+
+          - alert: CAdvisorDown
+            expr: up{job="cadvisor"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              component: monitoring
+            annotations:
+              summary: "cAdvisor недоступен"
+              description: "Prometheus не получает метрики контейнеров более 1 минуты"
+
+  service.yml: |
+    groups:
+      - name: service_alerts
+        interval: 15s
+        rules:
+          - alert: ServiceDown
+            expr: up == 0
+            for: 3m  # ИСПРАВЛЕНО: было 15s (1 scrape-промах = critical). 3m = 12 промахов подряд - отсекает транзиентные false positives.
+            labels:
+              severity: critical
+              component: service
+            annotations:
+              summary: "Сервис {{ $labels.job }} недоступен"
+              description: "Target {{ $labels.instance }} не отвечает"
+
+  kubernetes.yml: |
+    # kubernetes.yml - алерты на K8s объекты (требует kube-state-metrics)
+    groups:
+      - name: kubernetes_pods
+        rules:
+          - alert: KubePodCrashLooping
+            expr: |
+              max_over_time(
+                kube_pod_container_status_waiting_reason{
+                  reason="CrashLoopBackOff",
+                  job="kube-state-metrics"
+                }[5m]
+              ) >= 1
+            for: 15m
+            labels:
+              severity: critical
+              component: kubernetes
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} в CrashLoopBackOff"
+              description: "Контейнер {{ $labels.container }} перезапускается более 15 минут"
+
+          - alert: KubePodNotReady
+            expr: |
+              sum by (namespace, pod) (
+                kube_pod_status_phase{phase=~"Pending|Unknown|Failed"}
+              ) > 0
+            for: 15m
+            labels:
+              severity: warning
+              component: kubernetes
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} не готов"
+              description: "Pod находится в состоянии {{ $labels.phase }} более 15 минут"
+
+          - alert: KubePodOOMKilled
+            expr: >-
+              changes(kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}[10m]) > 0
+            # ИСПРАВЛЕНО: было gauge == 1 / for: 0s.
+            # gauge держит 1 бесконечно после OOM - алерт был "вечно firing".
+            # changes() > 0 срабатывает только при НОВОМ OOM-событии за 10 минут.
+            for: 0s
+            labels:
+              severity: warning
+              component: kubernetes
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} убит по OOM"
+              description: "Контейнер {{ $labels.container }} был завершён из-за нехватки памяти"
+
+      - name: kubernetes_workloads
+        rules:
+          - alert: KubeDeploymentNotAvailable
+            expr: |
+              kube_deployment_status_replicas_available
+              < kube_deployment_spec_replicas
+            for: 10m
+            labels:
+              severity: critical
+              component: kubernetes
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} деградирован"
+              description: "Доступно реплик меньше желаемого более 10 минут"
+
+          - alert: KubeStatefulSetNotAvailable
+            expr: |
+              kube_statefulset_status_replicas_ready
+              < kube_statefulset_spec_replicas
+            for: 10m
+            labels:
+              severity: critical
+              component: kubernetes
+            annotations:
+              summary: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} деградирован"
+              description: "Готово реплик меньше желаемого более 10 минут"
+
+          - alert: KubeDaemonSetNotScheduled
+            expr: |
+              kube_daemonset_status_desired_number_scheduled
+              - kube_daemonset_status_current_number_scheduled > 0
+            for: 10m
+            labels:
+              severity: warning
+              component: kubernetes
+            annotations:
+              summary: "DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} не запущен на всех нодах"
+              description: "Не запущено подов: {{ $value }}"
+
+      - name: kubernetes_nodes
+        rules:
+          - alert: KubeNodeNotReady
+            expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+            for: 5m
+            labels:
+              severity: critical
+              component: kubernetes
+            annotations:
+              summary: "Нода {{ $labels.node }} не готова"
+              description: "Нода перешла в состояние NotReady"
+
+          - alert: KubeNodeMemoryPressure
+            expr: kube_node_status_condition{condition="MemoryPressure", status="true"} == 1
+            for: 2m
+            labels:
+              severity: warning
+              component: kubernetes
+            annotations:
+              summary: "Нода {{ $labels.node }} - нехватка памяти"
+              description: "Kubelet сообщает о MemoryPressure на ноде"
+
+          - alert: KubeNodeDiskPressure
+            expr: kube_node_status_condition{condition="DiskPressure", status="true"} == 1
+            for: 2m
+            labels:
+              severity: warning
+              component: kubernetes
+            annotations:
+              summary: "Нода {{ $labels.node }} - нехватка места на диске"
+              description: "Kubelet сообщает о DiskPressure на ноде"
+
+      - name: kubernetes_storage
+        rules:
+          - alert: KubePVCFillingUp
+            expr: |
+              kubelet_volume_stats_available_bytes
+              / kubelet_volume_stats_capacity_bytes * 100 < 20
+            for: 5m
+            labels:
+              severity: warning
+              component: kubernetes
+            annotations:
+              summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} заполняется"
+              description: 'Свободно: {{ $value | printf "%.1f" }}%'
+
+          - alert: KubePVCNotBound
+            expr: kube_persistentvolumeclaim_status_phase{phase!="Bound"} == 1
+            for: 5m
+            labels:
+              severity: warning
+              component: kubernetes
+            annotations:
+              summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} не привязан"
+              description: "PVC находится в состоянии {{ $labels.phase }} более 5 минут"
+
+      - name: kubernetes_monitoring
+        rules:
+          - alert: KubeStateMetricsDown
+            expr: up{job="kube-state-metrics"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              component: monitoring
+            annotations:
+              summary: "kube-state-metrics недоступен"
+              description: "Prometheus не получает метрики K8s объектов более 1 минуты"

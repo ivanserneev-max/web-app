@@ -1,0 +1,148 @@
+groups:
+  - name: kubernetes_pods
+    rules:
+      - alert: KubePodCrashLooping
+        expr: |
+          max_over_time(
+            kube_pod_container_status_waiting_reason{
+              reason="CrashLoopBackOff",
+              job="kube-state-metrics"
+            }[5m]
+          ) >= 1
+        for: 15m
+        labels:
+          severity: critical
+          component: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} в CrashLoopBackOff"
+          description: "Контейнер {{ $labels.container }} перезапускается более 15 минут"
+
+      - alert: KubePodNotReady
+        expr: |
+          sum by (namespace, pod) (
+            kube_pod_status_phase{phase=~"Pending|Unknown|Failed"}
+          ) > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} не готов"
+          description: "Pod находится в состоянии {{ $labels.phase }} более 15 минут"
+
+      - alert: KubePodOOMKilled
+        expr: |
+          kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+        for: 0s
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} убит по OOM"
+          description: "Контейнер {{ $labels.container }} был завершён из-за нехватки памяти"
+
+  - name: kubernetes_workloads
+    rules:
+      - alert: KubeDeploymentNotAvailable
+        expr: |
+          kube_deployment_status_replicas_available
+          < kube_deployment_spec_replicas
+        for: 10m
+        labels:
+          severity: critical
+          component: kubernetes
+        annotations:
+          summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} деградирован"
+          description: "Доступно реплик меньше желаемого более 10 минут"
+
+      - alert: KubeStatefulSetNotAvailable
+        expr: |
+          kube_statefulset_status_replicas_ready
+          < kube_statefulset_spec_replicas
+        for: 10m
+        labels:
+          severity: critical
+          component: kubernetes
+        annotations:
+          summary: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} деградирован"
+          description: "Готово реплик меньше желаемого более 10 минут"
+
+      - alert: KubeDaemonSetNotScheduled
+        expr: |
+          kube_daemonset_status_desired_number_scheduled
+          - kube_daemonset_status_current_number_scheduled > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} не запущен на всех нодах"
+          description: "Не запущено подов: {{ $value }}"
+
+  - name: kubernetes_nodes
+    rules:
+      - alert: KubeNodeNotReady
+        expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: kubernetes
+        annotations:
+          summary: "Нода {{ $labels.node }} не готова"
+          description: "Нода перешла в состояние NotReady"
+
+      - alert: KubeNodeMemoryPressure
+        expr: kube_node_status_condition{condition="MemoryPressure", status="true"} == 1
+        for: 2m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "Нода {{ $labels.node }} — нехватка памяти"
+          description: "Kubelet сообщает о MemoryPressure на ноде"
+
+      - alert: KubeNodeDiskPressure
+        expr: kube_node_status_condition{condition="DiskPressure", status="true"} == 1
+        for: 2m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "Нода {{ $labels.node }} — нехватка места на диске"
+          description: "Kubelet сообщает о DiskPressure на ноде"
+
+  - name: kubernetes_storage
+    rules:
+      - alert: KubePVCFillingUp
+        expr: |
+          kubelet_volume_stats_available_bytes
+          / kubelet_volume_stats_capacity_bytes * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} заполняется"
+          description: 'Свободно: {{ $value | printf "%.1f" }}%'
+
+      - alert: KubePVCNotBound
+        expr: kube_persistentvolumeclaim_status_phase{phase!="Bound"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} не привязан"
+          description: "PVC находится в состоянии {{ $labels.phase }} более 5 минут"
+
+  - name: kubernetes_monitoring
+    rules:
+      - alert: KubeStateMetricsDown
+        expr: up{job="kube-state-metrics"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: monitoring
+        annotations:
+          summary: "kube-state-metrics недоступен"
+          description: "Prometheus не получает метрики K8s объектов более 1 минуты"
