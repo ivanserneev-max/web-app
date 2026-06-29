@@ -89,8 +89,23 @@ spec:
             - name: configmap-provisioning
               mountPath: /etc/grafana/provisioning/dashboards/dashboard.yml
               subPath: dashboard.yml
-            - name: configmap-dashboards
+            # Монтируем через projected volume - оба ConfigMap объединяются в
+            # одну директорию без subPath, что критично для работы
+            # updateIntervalSeconds: 30 (Grafana перечитывает файлы сама,
+            # kubelet обновляет их автоматически каждые ~60 сек, так как
+            # тут нет subPath).
+            - name: dashboards
               mountPath: /etc/grafana/dashboards/
+            # Эфемерное хранилище: stateless по решению из другого чата.
+            # SQLite и пользовательские настройки UI теряются при рестарте -
+            # принятый трейдофф: всё важное (дашборды, datasource, пользователь)
+            # приходит из ConfigMap/Secret при старте.
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
+            - name: tmp
+              mountPath: /tmp
+            - name: grafana-logs
+              mountPath: /var/log/grafana
           resources:
             requests:
               memory: "128Mi"
@@ -105,6 +120,22 @@ spec:
         - name: configmap-provisioning
           configMap:
             name: grafana-provisioning
-        - name: configmap-dashboards
-          configMap:
-            name: grafana-dashboards
+        # ИЗМЕНЕНО: был один ConfigMap "grafana-dashboards" с обоими JSON (~565KB).
+        # Разбит на два отдельных ConfigMap (по одному дашборду в каждом),
+        # чтобы не упереться в лимит 1 MiB при добавлении третьего дашборда.
+        # projected volume объединяет оба ConfigMap в одну директорию -
+        # Grafana видит оба JSON в /etc/grafana/dashboards/, как если бы
+        # они лежали в одном ConfigMap.
+        - name: dashboards
+          projected:
+            sources:
+              - configMap:
+                  name: grafana-dashboard-cadvisor
+              - configMap:
+                  name: grafana-dashboard-node-exporter
+        - name: grafana-storage
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: grafana-logs
+          emptyDir: {}
