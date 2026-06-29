@@ -6,10 +6,20 @@ metadata:
 data:
   alertmanager.yml: |
     global:
+      # Если Alertmanager перестаёт получать алерт от Prometheus (например,
+      # сам Prometheus недоступен), он подождёт 5 минут перед тем, как
+      # считать алерт автоматически "resolved" - защита от случайного
+      # "всё ок" из-за временного сетевого сбоя, а не реального решения.
       resolve_timeout: 5m
 
     route:
-      group_by: ['alertname', 'severity', 'component', 'name']
+      # ИСПРАВЛЕНО: убран "name" - этот label не выставляется ни одним
+      # правилом ни в одном из 4 файлов prometheus/configmap-alerts.yml
+      # (там используются только alertname/severity/component). Это было
+      # наследие старого Docker Compose сетапа, где "name" добавлялся через
+      # relabeling на cAdvisor (имя контейнера). В K8s такого relabeling
+      # нет - group_by с несуществующим label просто не делает ничего
+      group_by: ['alertname', 'severity', 'component', 'namespace']
       group_wait: 5s
       group_interval: 10s
       repeat_interval: 4h
@@ -30,8 +40,8 @@ data:
     receivers:
       - name: telegram
         telegram_configs:
-        - bot_token_file: '/run/secrets/telegram_token'
-          chat_id_file: '/run/secrets/telegram_chat_id'
+        - bot_token_file: '/run/secrets/telegram_token'      # путь = ключ Secret "telegram_token" из alertmanager-secret, смонтированный в alertmanager/statefulset.yml
+          chat_id_file: '/run/secrets/telegram_chat_id'       # путь = ключ Secret "telegram_chat_id" из того же Secret
           message: |
             {{ if eq .Status "firing" }}🔥 АЛЕРТ{{ else }}✅ РЕШЕНО{{ end }}
 
@@ -44,12 +54,17 @@ data:
             {{ if .Labels.instance }}🖥 Хост: {{ .Labels.instance }}{{ end }}
             📝 {{ .Annotations.description }}
             ⏰ Начало: {{ .StartsAt.Local.Format "02.01.2006 15:04:05" }}
-            {{ end }}     
-          # parse_mode=""
+            {{ end }}
           parse_mode: ""
           send_resolved: true
 
     inhibit_rules:
+      # Если упал сам экспортер (cAdvisor/node-exporter), не нужно
+      # одновременно заваливать Telegram алертами по всем метрикам, которые
+      # от него зависят, - это просимптом того же сбоя, а не отдельная
+      # проблема. equal: [] здесь намеренно пустой: подавляюися все алерты
+      # нужного component, пока источник активен, без привязки к
+      # совпадению дополнительных labels.
       - source_matchers:
           - alertname = "CAdvisorDown"
         target_matchers:
@@ -62,8 +77,13 @@ data:
           - component = "host"
         equal: []
 
+      # Если по одному и тому же alertname/component уже горит critical -
+      # подавляем дублирующий warning по тому же поводу. ИСПРАВЛЕНО: "name"
+      # убран по той же причине, что и в group_by выше (label не существует
+      # ни в одном правиле - без него условие "equal" работает так же, но
+      # не вводит в заблуждение при чтении).
       - source_matchers:
           - severity = "critical"
         target_matchers:
           - severity = "warning"
-        equal: ['alertname', 'component', 'name']
+        equal: ['alertname', 'component', 'namespace']
