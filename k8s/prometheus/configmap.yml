@@ -16,7 +16,7 @@ data:
           - targets: ['localhost:9090']
 
       # node-exporter - DaemonSet: один под на каждую ноду.
-      # kubernetes_sd_configs с role: endpoints - единственный способ
+      # kubernetes_sd_configs с role: endpoints - рекомендуемый способ
       # скрейпить каждый под DaemonSet'а отдельно. static_configs с одним
       # DNS-именем Service'а даёт метрики только ОДНОЙ случайной ноды.
       - job_name: 'node-exporter'
@@ -57,13 +57,46 @@ data:
         static_configs:
           - targets: ['alertmanager.monitoring.svc.cluster.local:9093']
 
+      # ДОБАВЛЕНО: МОНИТОРИНГ СИСТЕМНЫХ КОМПОНЕНТОВ KUBERNETES
+      # API Server (Control Plane)
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+          - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true # Игнорируем самоподписанные сертификаты локального кластера
+        authorization:
+          credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          # Выбираем только стандартный сервис kubernetes в namespace default на https порту (443)
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: default;kubernetes;https
+
+      # CoreDNS (Внутренний DNS)
+      - job_name: 'coredns'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['kube-system'] # CoreDNS живет в системном неймспейсе
+        relabel_configs:
+          # Ищем сервис kube-dns
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: kube-dns
+          # Собираем метрики только с порта metrics (9153)
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+
     alerting:
       alertmanagers:
-        # Headless-сервис + kubernetes_sd_configs (роль endpoints) - работает
-        # при любом количестве реплик Alertmanager.
-        # static_configs с обычным ClusterIP допустим только для replicas: 1,
-        # при >1 отправлял бы все уведомления на одну случайную реплику.
-        # Текущая конфигурация не требует изменений при масштабировании.
+        # Используется discovery через endpoints, чтобы конфигурация
+        # не требовала изменений при будущем масштабировании
+        # Alertmanager до нескольких реплик.
+        # При текущем replicas: 1 аналогично работал бы и обычный
+        # static_configs с ClusterIP Service.
         - kubernetes_sd_configs:
             - role: endpoints
               namespaces:
