@@ -112,7 +112,7 @@ spec:
         # На текущем single-node кластере работает как local storage,
         # при добавлении нод PVC автоматически станет реплицированным
         # без изменения манифеста.
-        storageClassName: longhorn
+        storageClassName: local-path
         resources:
           requests:
             storage: 1Gi

@@ -137,7 +137,7 @@ spec:
         name: prometheus-storage
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: longhorn
+        storageClassName: local-path
         resources:
           requests:
             # Размер PVC выбран с запасом под WAL,
