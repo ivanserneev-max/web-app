@@ -44,10 +44,10 @@ spec:
           env:
             - name: GF_SECURITY_ADMIN_USER
               valueFrom:
-                secretKeyRef:
-                  name: grafana-secret
-                  key: grafana_admin_user
-            - name: GF_SECURITY_ADMIN_PASSWORD_FILE
+                configMapKeyRef:
+                  name: grafana-env
+                  key: GF_SECURITY_ADMIN_USER
+            - name: GF_SECURITY_ADMIN_PASSWORD__FILE
               value: /run/secrets/grafana_admin_password
             - name: GF_ANALYTICS_REPORTING_ENABLED
               value: "false"
