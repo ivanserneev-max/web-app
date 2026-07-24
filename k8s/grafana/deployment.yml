@@ -61,6 +61,8 @@ spec:
               value: ""
             - name: GF_PLUGIN_SKIP_PUBLIC_KEY_DOWNLOAD
               value: "true"
+            - name: GF_DATABASE_WAL_MODE
+              value: "true"
           ports:
             - name: http
               containerPort: 3000
@@ -68,24 +70,25 @@ spec:
             httpGet:
               path: /api/health
               port: http
-            initialDelaySeconds: 10
-            failureThreshold: 30
-            periodSeconds: 10
+            initialDelaySeconds: 30
+            failureThreshold: 5
+            periodSeconds: 20
+            timeoutSeconds: 10
           livenessProbe:
             httpGet:
               path: /api/health
               port: http
             initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 1
-            failureThreshold: 3
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 5
           readinessProbe:
             httpGet:
               path: /api/health
               port: http
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 1
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
@@ -110,7 +113,7 @@ spec:
             # kubelet обновляет их автоматически каждые ~60 сек, так как
             # тут нет subPath).
             - name: dashboards
-              mountPath: /etc/grafana/dashboards/
+              mountPath: /etc/grafana/dashboards
             # Эфемерное хранилище: stateless по решению из другого чата.
             # SQLite и пользовательские настройки UI теряются при рестарте -
             # принятый трейдофф: всё важное (дашборды, datasource, пользователь)
