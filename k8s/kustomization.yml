@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: monitoring
+
+resources:
+  # Кластер-скоупed и namespace-определяющие ресурсы — первыми
+  - namespace.yml
+  - priorityclass.yml      # см. caveat ниже про cluster-scoped
+
+  # Затем сервисы, в порядке зависимостей
+  - prometheus             # prometheus должен стартовать ДО exporters, чтобы метрики начали собираться
+  - alertmanager           # ему нужны правила из prometheus configmap-alerts (косвенно)
+  - kube-state-metrics     # RBAC нужен ДО всех остальных, кто мог бы читать k8s API
+  - node-exporter
+  - cadvisor
+  - postgres
+  - adminer
+  - grafana                # grafana ссылается на prometheus + дашборды — идёт позже
+  - ingress                # ingress последним, потому что ссылается на grafana/prometheus/alertmanager
