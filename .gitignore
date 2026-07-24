@@ -1,29 +1,33 @@
-# Docker volumes и временные файлы
+# Docker volumes
 postgres-data/
 data/
 
-# Логи
+# Logs
 *.log
 
-# IDE и редакторы
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Системные файлы
+# OS files
 .DS_Store
 Thumbs.db
 
-# Переменные окружения и Секреты
+# Environment
 .env
 .env.local
 .env.production
+
+# Docker Compose secrets
 secrets/
 
-# Временные файлы
+# Kubernetes runtime configs
+k8s/**/secret.yml
+k8s/**/config.yml
+k8s/ingress/secret-basicauth.yml
+
+# Temporary files
 *.tmp
 *.bak
-
-# Grafana создаёт файлы при работе — не нужны в git
-grafana/data/
