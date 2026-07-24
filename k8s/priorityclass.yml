@@ -1,0 +1,30 @@
+# PriorityClass для компонентов мониторинга.
+#
+# ЗАЧЕМ: при нехватке ресурсов на ноде Kubernetes scheduler может вытеснить
+# (evict) поды с более низким приоритетом, чтобы освободить место для
+# критичных нагрузок. Без явного приоритета Prometheus и Alertmanager
+# ничем не отличаются по важности от обычных приложений - и могут быть
+# вытеснены в первую очередь именно тогда, когда мониторинг нужнее всего
+# (при высокой нагрузке на ноду).
+#
+# ПОЧЕМУ НЕ system-cluster-critical: это зарезервированный класс для
+# системных компонентов kube-system (coredns, kube-proxy и т.п.).
+# Использовать его для пользовательских нагрузок - нарушение соглашения
+# и потенциальный риск вытеснить настоящие системные компоненты.
+#
+# value: 900000000 - чуть ниже system-cluster-critical (2000000000),
+# но выше любой обычной нагрузки (дефолт 0). Prometheus/Alertmanager
+# будут вытеснены только если кластеру не хватает ресурсов для kube-proxy
+# или DNS - то есть практически никогда в нормальной ситуации.
+#
+# Применяется в: prometheus/statefulset.yml, alertmanager/statefulset.yml.
+# Для Grafana, kube-state-metrics, cAdvisor, node-exporter приоритет
+# намеренно не задан - они важны, но восстанавливаются быстро при рестарте,
+# в отличие от Prometheus с его WAL.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: monitoring-critical
+value: 900000000
+globalDefault: false
+description: "Приоритет для core-компонентов мониторинга (Prometheus, Alertmanager)"
