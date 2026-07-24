@@ -30,15 +30,15 @@ route:
   # Напоминать о не решённом алерте каждые 4 часа
   repeat_interval: 4h
   
-  # Получатель по умолчанию
-  receiver: telegram
+  # новый комбинированный ресивер
+  receiver: 'discord-and-ntfy'
 
   # Дочерние маршруты — переопределяют параметры для конкретных алертов
   routes:
     # Алерты мониторинга (Alertmanager упал) — максимальный приоритет
     - match:                           # match: точное совпадение одной метки
         component: monitoring
-      receiver: telegram
+      receiver: 'discord-and-ntfy'
       group_wait: 0s                   # Отправляем мгновенно
       repeat_interval: 30m             # Напоминать каждые 30 минут — мониторинг должен быть восстановлен
 
@@ -46,11 +46,10 @@ route:
     # Критические алерты отправляем быстрее и напоминаем чаще
     - match:                           # match: точное совпадение одной метки
         severity: critical
-      receiver: telegram
+      receiver: 'discord-and-ntfy'
       group_wait: 1s                   # 1s — critical требует немедленного уведомления
       repeat_interval: 1h              # Напоминать каждый час пока проблема не решена.
 
-# RECEIVERS: получатели уведомлений
 receivers:
   - name: telegram
     telegram_configs:
@@ -82,6 +81,24 @@ receivers:
         # Отправлять уведомление когда алерт решился
         send_resolved: true
 
+  # Новый объединенный ресивер для Discord и Ntfy
+  - name: 'discord-and-ntfy'
+    discord_configs:
+      - webhook_url: 'https://discord.com/api/webhooks/1525124973914619924/exnSlZ-A3AYdazHraqZw9uEn6LnmT_OaR0EpA7bWXp2V9l2Wfu5B7ohkN4ZWWprzhzl4'
+        title: '{{ if eq .Status "firing" }}🔥 {{ .GroupLabels.alertname }}{{ else }}✅ {{ .GroupLabels.alertname }} (resolved){{ end }}'
+        message: |
+          **Severity:** {{ .CommonLabels.severity }}
+          **Component:** {{ .CommonLabels.component }}
+          {{ range .Alerts }}
+          • {{ if .Labels.name }}`{{ .Labels.name }}` — {{ end }}{{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+
+ 
+    webhook_configs:
+      - url: 'https://ntfy.sh/boka_i4s6a93?template=alertmanager'
+        send_resolved: true
+        max_alerts: 0
 # Подавление дублирующихся алертов (inhibit_rules)
 # Если сработал критический алерт — подавляем связанные warning, чтобы не создавать шум
 # Логика: если source_matchers активен → подавить target_matchers.
