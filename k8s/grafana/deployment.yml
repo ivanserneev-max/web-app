@@ -96,8 +96,7 @@ spec:
               type: RuntimeDefault
           volumeMounts:
             - name: grafana-secrets
-              mountPath: /run/secrets/grafana_admin_password
-              subPath: grafana_admin_password
+              mountPath: /run/secrets
               readOnly: true
             - name: configmap-provisioning
               mountPath: /etc/grafana/provisioning/datasources/datasource.yml
