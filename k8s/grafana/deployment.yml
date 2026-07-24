@@ -134,23 +134,34 @@ spec:
       volumes:
         - name: grafana-secrets
           secret:
-            name: grafana-secret
+            secretName: grafana-secret
         - name: configmap-provisioning
           configMap:
             name: grafana-provisioning
-        # ИЗМЕНЕНО: был один ConfigMap "grafana-dashboards" с обоими JSON (~565KB).
-        # Разбит на два отдельных ConfigMap (по одному дашборду в каждом),
-        # чтобы не упереться в лимит 1 MiB при добавлении третьего дашборда.
-        # projected volume объединяет оба ConfigMap в одну директорию -
-        # Grafana видит оба JSON в /etc/grafana/dashboards/, как если бы
-        # они лежали в одном ConfigMap.
+        # Dashboard ConfigMap генерируются Kustomize через configMapGenerator
+        # из файлов dashboards/*.json.
+        # Kustomize автоматически добавляет hash к имени ConfigMap и
+        # переписывает ссылки в Deployment, благодаря чему изменение JSON
+        # вызывает автоматический rollout Grafana без ручного restart.
         - name: dashboards
           projected:
             sources:
               - configMap:
-                  name: grafana-dashboard-cadvisor
-              - configMap:
                   name: grafana-dashboard-node-exporter
+              - configMap:
+                  name: grafana-dashboard-k8s-global
+              - configMap:
+                  name: grafana-dashboard-k8s-namespaces
+              - configMap:
+                  name: grafana-dashboard-k8s-nodes
+              - configMap:
+                  name: grafana-dashboard-k8s-pods
+              - configMap:
+                  name: grafana-dashboard-k8s-apiserver
+              - configMap:
+                  name: grafana-dashboard-k8s-coredns
+              - configMap:
+                  name: grafana-dashboard-prometheus
         - name: grafana-storage
           emptyDir: {}
         - name: tmp

@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yml
+  - service.yml
+  - configmap-provisioning.yml
+  - config.yml
+  - secret.yml
+
+configMapGenerator:
+  - name: grafana-dashboard-node-exporter
+    files:
+      - dashboards/node-exporter.json
+  - name: grafana-dashboard-k8s-global
+    files:
+      - dashboards/dotdc-15757.json
+  - name: grafana-dashboard-k8s-namespaces
+    files:
+      - dashboards/dotdc-15758.json
+  - name: grafana-dashboard-k8s-nodes
+    files:
+      - dashboards/dotdc-15759.json
+  - name: grafana-dashboard-k8s-pods
+    files:
+      - dashboards/dotdc-15760.json
+  - name: grafana-dashboard-k8s-apiserver
+    files:
+      - dashboards/dotdc-15761.json
+  - name: grafana-dashboard-k8s-coredns
+    files:
+      - dashboards/dotdc-15762.json
+  - name: grafana-dashboard-prometheus
+    files:
+      - dashboards/dotdc-19105.json
