@@ -39,6 +39,8 @@ spec:
           args:
             - "--port=8080"
             - "--telemetry-port=8081"
+            - "--resources=nodes,pods,services,endpoints,persistentvolumes,persistentvolumeclaims,namespaces,replicationcontrollers,resourcequotas,configmaps,limitranges,daemonsets,deployments,replicasets,statefulsets,jobs,cronjobs,horizontalpodautoscalers,storageclasses,volumeattachments"
+
           ports:
             - name: metrics
               containerPort: 8080
