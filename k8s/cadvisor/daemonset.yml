@@ -92,10 +92,6 @@ spec:
               readOnly: true
             - name: docker
               mountPath: /var/lib/docker
-              readOnly: true
-            - name: disk
-              mountPath: /dev/disk
-              readOnly: true
       tolerations:
         # operator: Exists без key/effect - толерантен к ЛЮБЫМ taint'ам,
         # включая control-plane. Это осознанно: метрики хочется собирать
@@ -132,7 +128,8 @@ spec:
             # большинство runtime просто примонтируют то, что есть (пустую
             # директорию, если Docker не используется) - без этого
             # послабления манифест был бы хрупким именно на containerd-нодах.
-        - name: disk
-          hostPath:
-            path: /dev/disk
-            type: Directory
+            #
+            # /dev/disk убран — k3d использует вложенный контейнер как "ноду",
+            # /dev/disk там не существует как обычная директория.
+            # На реальном K8s/k3s (production VPS) можно вернуть при необходимости.
+
