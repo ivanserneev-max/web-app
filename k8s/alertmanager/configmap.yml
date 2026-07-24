@@ -13,50 +13,82 @@ data:
       resolve_timeout: 5m
 
     route:
+      receiver: discord-and-ntfy
       # ИСПРАВЛЕНО: убран "name" - этот label не выставляется ни одним
       # правилом ни в одном из 4 файлов prometheus/configmap-alerts.yml
       # (там используются только alertname/severity/component). Это было
       # наследие старого Docker Compose сетапа, где "name" добавлялся через
       # relabeling на cAdvisor (имя контейнера). В K8s такого relabeling
       # нет - group_by с несуществующим label просто не делает ничего
-      group_by: ['alertname', 'severity', 'component', 'namespace']
-      group_wait: 5s
-      group_interval: 10s
+      group_by:
+        - alertname
+        - severity
+        - component
+        - namespace
+      group_wait: 30s
+      group_interval: 5m
       repeat_interval: 4h
-      receiver: telegram
       routes:
         - matchers:
-            - component = 'monitoring'
-          receiver: telegram
+            - component = "monitoring"
           group_wait: 0s
           repeat_interval: 30m
 
         - matchers:
-            - severity = 'critical'
-          receiver: telegram
+            - severity = "critical"
           group_wait: 1s
           repeat_interval: 1h
 
     receivers:
-      - name: telegram
+      # Основной рабочий receiver: Discord + ntfy
+      # (Telegram сейчас заблокирован провайдером, см. ниже)
+      - name: 'discord-and-ntfy'
+        discord_configs:
+          - webhook_url_file: /run/secrets/discord_webhook
+            title: '{{ if eq .Status "firing" }}🔥 {{ .GroupLabels.alertname }}{{ else }}✅ {{ .GroupLabels.alertname }} (resolved){{ end }}'
+            message: |
+              **Severity:** {{ .CommonLabels.severity }}
+              **Component:** {{ .CommonLabels.component }}
+              **Namespace:** {{ .CommonLabels.namespace }}
+              {{ range .Alerts }}
+              • {{ if .Labels.pod }}{{ .Labels.pod }}{{ else }}{{ .Labels.instance }}{{ end }} — {{ .Annotations.description }}
+              {{ end }}
+            send_resolved: true
+
+        webhook_configs:
+          - url_file: /run/secrets/ntfy_url
+            # Таймаут ОБЯЗАТЕЛЕН: без него зависший запрос к
+            # внешнему сервису может висеть неограниченно.
+            # Должен быть < group_interval (5m).
+            timeout: 10s
+            send_resolved: true
+            max_alerts: 0
+            
+      # Telegram — определён, но НЕ подключён ни в одном route
+      # Это ОФИЦИАЛЬНО поддерживаемая конфигурация Alertmanager
+      # (receiver без route). Когда Telegram станет доступен,
+      # чтобы включить: добавьте 'receiver: telegram' в нужный
+      # route (или в default) — БОЛЬШЕ НИЧЕГО МЕНЯТЬ НЕ НУЖНО.
+      - name: 'telegram'
         telegram_configs:
-        - bot_token_file: '/run/secrets/telegram_token'      # путь = ключ Secret "telegram_token" из alertmanager-secret, смонтированный в alertmanager/statefulset.yml
-          chat_id_file: '/run/secrets/telegram_chat_id'       # путь = ключ Secret "telegram_chat_id" из того же Secret
-          message: |
-            {{ if eq .Status "firing" }}🔥 АЛЕРТ{{ else }}✅ РЕШЕНО{{ end }}
+          - bot_token_file: '/run/secrets/telegram_token'
+            chat_id_file:   '/run/secrets/telegram_chat_id'
+            message: |
+              {{ if eq .Status "firing" }}🔥 АЛЕРТ{{ else }}✅ РЕШЕНО{{ end }}
 
-            Алерт: {{ .GroupLabels.alertname }}
-            Срочность: {{ .CommonLabels.severity }}
-            Компонент: {{ .CommonLabels.component }}
+              Алерт: {{ .GroupLabels.alertname }}
+              Срочность: {{ .CommonLabels.severity }}
+              Компонент: {{ .CommonLabels.component }}
+              Namespace: {{ .CommonLabels.namespace }}
 
-            {{ range .Alerts }}
-            {{ if .Labels.name }}📦 Контейнер: {{ .Labels.name }}{{ end }}
-            {{ if .Labels.instance }}🖥 Хост: {{ .Labels.instance }}{{ end }}
-            📝 {{ .Annotations.description }}
-            ⏰ Начало: {{ .StartsAt.Local.Format "02.01.2006 15:04:05" }}
-            {{ end }}
-          parse_mode: ""
-          send_resolved: true
+              {{ range .Alerts }}
+              📦 {{ if .Labels.pod }}{{ .Labels.pod }}{{ else }}{{ .Labels.instance }}{{ end }}
+              {{ if .Labels.instance }}🖥 Хост: {{ .Labels.instance }}{{ end }}
+              📝 {{ .Annotations.description }}
+              ⏰ Начало: {{ .StartsAt.Local.Format "02.01.2006 15:04:05" }}
+              {{ end }}
+            parse_mode: ""        # Пусто = без Markdown, чтобы спецсимволы не ломали
+            send_resolved: true
 
     inhibit_rules:
       # Если упал сам экспортер (cAdvisor/node-exporter), не нужно
